@@ -1,0 +1,6 @@
+hostPort: localhost:9999
+metricFilter:
+  nameMustNotBeEqualTo:
+    - jvm_threads_deadlocked
+rules:
+- pattern: ".*"

@@ -1,0 +1,5 @@
+metricFilter:
+  nameMustNotBeEqualTo:
+    - jvm_threads_deadlocked
+rules:
+- pattern: ".*"
