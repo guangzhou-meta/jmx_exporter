@@ -7,6 +7,7 @@ import org.yaml.snakeyaml.Yaml;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import java.io.*;
+import java.nio.channels.FileChannel;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.logging.Logger;
@@ -28,7 +29,10 @@ public class JmxCollector extends Collector implements Collector.Describable {
             .help("Number of times configuration have failed to be reloaded.").register();
 
     private static final Logger LOGGER = Logger.getLogger(JmxCollector.class.getName());
+
     private SimpleDateFormat dateFormatter;
+
+    private static final Object THREAD_INFOS_LOGGER_LOCKER = new Object();
 
     static class Rule {
         Pattern pattern;
@@ -608,16 +612,27 @@ public class JmxCollector extends Collector implements Collector.Describable {
     }
 
     private void appendThreadsInfo(Config config) {
-        String threadsInfoLog = config.threadsInfoLog;
+        final String threadsInfoLog = config.threadsInfoLog;
         if (threadsInfoLog != null) {
-            File logFile = new File(threadsInfoLog);
+            if (dateFormatter == null) {
+                dateFormatter = new SimpleDateFormat("yyyy-MM-dd HH-mm-ss.SSS");
+            }
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    logThreadsInfo(threadsInfoLog);
+                }
+            }).start();
+        }
+    }
+
+    private void logThreadsInfo(String threadsInfoLog) {
+        synchronized (THREAD_INFOS_LOGGER_LOCKER) {
+            String currentDate = dateFormatter.format(new Date());
+            File logFile = sliceLogFile(threadsInfoLog, currentDate);
             FileWriter fos = null;
             try {
                 fos = new FileWriter(logFile);
-                if (dateFormatter == null) {
-                    dateFormatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-                }
-                String currentDate = dateFormatter.format(new Date());
                 for (Thread thread : Thread.getAllStackTraces().keySet()) {
                     fos.append("[").append(currentDate).append("]") // DateTime
                             .append("\n")
@@ -651,6 +666,48 @@ public class JmxCollector extends Collector implements Collector.Describable {
                         e.printStackTrace();
                     }
                 }
+            }
+        }
+    }
+
+    private File sliceLogFile(String threadsInfoLog, String currentDate) {
+        File logFile = new File(threadsInfoLog);
+        if (logFile.exists()) {
+            String fileDate = dateFormatter.format(new Date(logFile.lastModified()));
+            String lastDate = fileDate.substring(0, 10);
+            if (!currentDate.substring(0, 10).equals(lastDate)) {
+                // Slice Log File
+                String sliceFilePath = logFile.getParentFile().getAbsolutePath() + "/" + lastDate.trim() + "/" + logFile.getName();
+                File sliceFile = new File(sliceFilePath);
+                boolean ignored = sliceFile.getParentFile().mkdirs();
+                copyFile(logFile, sliceFile);
+                ignored = logFile.delete();
+                logFile = new File(threadsInfoLog);
+            }
+        }
+        return logFile;
+    }
+
+    private void copyFile(File inFile, File outFile) {
+        FileChannel inChannel = null;
+        FileChannel outChannel = null;
+        try {
+            inChannel = new FileInputStream(inFile).getChannel();
+            outChannel = new FileOutputStream(outFile).getChannel();
+            outChannel.transferFrom(inChannel, 0, inChannel.size());
+        } catch (Exception ignored) {
+        } finally {
+            try {
+                if (inChannel != null) {
+                    inChannel.close();
+                }
+            } catch (Exception ignored) {
+            }
+            try {
+                if (outChannel != null) {
+                    outChannel.close();
+                }
+            } catch (Exception ignored) {
             }
         }
     }
