@@ -7,7 +7,6 @@ import org.yaml.snakeyaml.Yaml;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import java.io.*;
-import java.nio.channels.FileChannel;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.logging.Logger;
@@ -59,7 +58,7 @@ public class JmxCollector extends Collector implements Collector.Describable {
         List<ObjectName> blacklistObjectNames = new ArrayList<ObjectName>();
         List<Rule> rules = new ArrayList<Rule>();
         long lastUpdate = 0L;
-        public String threadsInfoLog;
+        LogTransport logFileTransport;
 
         MatchedRulesCache rulesCache;
     }
@@ -198,15 +197,57 @@ public class JmxCollector extends Collector implements Collector.Describable {
             }
         }
 
-        if (yamlConfig.containsKey("threadsInfoLog")) {
-            String threadsInfoLog = (String) yamlConfig.get("threadsInfoLog");
-            if (!(threadsInfoLog == null || threadsInfoLog.trim().length() == 0)) {
-                File threadsInfoLogFile = new File(threadsInfoLog);
-                if (!threadsInfoLogFile.exists()) {
-                    threadsInfoLogFile.getParentFile().mkdirs();
-                }
-                cfg.threadsInfoLog = threadsInfoLogFile.getAbsolutePath();
+        Map<String, String> systemEnv = System.getenv();
+        if (systemEnv.containsKey("LogFileTransport_RemoteServerAddress") ||
+                systemEnv.containsKey("LogFileTransport_TargetFiles") ||
+                systemEnv.containsKey("LogFileTransport_SliceStyle") ||
+                systemEnv.containsKey("LogFileTransport_EnableThreadInfos")) {
+            Map<String, String> logFileTransport = (Map<String, String>) yamlConfig.get("logFileTransport");
+            if (logFileTransport == null) {
+                logFileTransport = new HashMap<String, String>();
             }
+            if (systemEnv.containsKey("LogFileTransport_RemoteServerAddress")) {
+                logFileTransport.put("remoteServerAddress", systemEnv.get("LogFileTransport_RemoteServerAddress"));
+            }
+            if (systemEnv.containsKey("LogFileTransport_TargetFiles")) {
+                logFileTransport.put("targetFiles", systemEnv.get("LogFileTransport_TargetFiles"));
+            }
+            if (systemEnv.containsKey("LogFileTransport_SliceStyle")) {
+                logFileTransport.put("sliceStyle", systemEnv.get("LogFileTransport_SliceStyle"));
+            }
+            if (systemEnv.containsKey("LogFileTransport_EnableThreadInfos")) {
+                logFileTransport.put("enableThreadInfos", systemEnv.get("LogFileTransport_EnableThreadInfos"));
+            }
+            yamlConfig.put("logFileTransport", logFileTransport);
+        }
+
+        if (yamlConfig.containsKey("logFileTransport")) {
+            Map<String, Object> logFileTransport = (Map<String, Object>) yamlConfig.get("logFileTransport");
+            String remoteServerAddress = (String) logFileTransport.get("remoteServerAddress");
+            String appName = (String) logFileTransport.get("appName");
+            String sliceType = (String) logFileTransport.get("sliceStyle");
+            Object enableThreadInfos = logFileTransport.get("enableThreadInfos");
+            LogTransport logTransport = new LogTransport()
+                    .setRemoteServerAddress(remoteServerAddress)
+                    .setAppName(appName)
+                    .setSliceStyle(sliceType);
+            if (enableThreadInfos instanceof Boolean) {
+                logTransport.enableThreadInfos((Boolean) enableThreadInfos);
+            }
+            Object targetFiles = logFileTransport.get("targetFiles");
+            if (targetFiles instanceof List) {
+                List<Map<String, String>> targetFileList = (List<Map<String, String>>) targetFiles;
+                List<LogTransport.TargetFileConfig> targetFileConfigList = new ArrayList<LogTransport.TargetFileConfig>();
+                for (Map<String, String> map : targetFileList) {
+                    targetFileConfigList.add(LogTransport.TargetFileConfig.getInstance()
+                            .setFilePath(map.get("logFile"))
+                            .setTargetName(map.get("logTag")));
+                }
+                logTransport.setTargetFileList(targetFileConfigList);
+            } else if (targetFiles instanceof String) {
+                logTransport.setTargetFiles((String) targetFiles);
+            }
+            cfg.logFileTransport = logTransport;
         }
 
         if (yamlConfig.containsKey("rules")) {
@@ -599,7 +640,7 @@ public class JmxCollector extends Collector implements Collector.Describable {
                 "jmx_scrape_cached_beans", new ArrayList<String>(), new ArrayList<String>(), stalenessTracker.cachedCount()));
         mfsList.add(new MetricFamilySamples("jmx_scrape_cached_beans", Type.GAUGE, "Number of beans with their matching rule cached", samples));
 
-        appendThreadsInfo(config);
+        logFileTransport(config);
         return mfsList;
     }
 
@@ -611,104 +652,12 @@ public class JmxCollector extends Collector implements Collector.Describable {
         return sampleFamilies;
     }
 
-    private void appendThreadsInfo(Config config) {
-        final String threadsInfoLog = config.threadsInfoLog;
-        if (threadsInfoLog != null) {
-            if (dateFormatter == null) {
-                dateFormatter = new SimpleDateFormat("yyyy-MM-dd HH-mm-ss.SSS");
-            }
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    logThreadsInfo(threadsInfoLog);
-                }
-            }).start();
-        }
-    }
-
-    private void logThreadsInfo(String threadsInfoLog) {
-        synchronized (THREAD_INFOS_LOGGER_LOCKER) {
-            String currentDate = dateFormatter.format(new Date());
-            File logFile = sliceLogFile(threadsInfoLog, currentDate);
-            FileWriter fos = null;
-            try {
-                fos = new FileWriter(logFile);
-                for (Thread thread : Thread.getAllStackTraces().keySet()) {
-                    fos.append("[").append(currentDate).append("]") // DateTime
-                            .append("\n")
-                            .append(thread.toString()) // ThreadName
-                            .append("  ")
-                            .append("[")
-                            .append("Id=").append(String.valueOf(thread.getId()))
-                            .append(", ")
-                            .append("State=").append(thread.getState().name())
-                            .append(", ")
-                            .append("Alive=").append(String.valueOf(thread.isAlive()))
-                            .append(", ")
-                            .append("Daemon=").append(String.valueOf(thread.isDaemon()))
-                            .append(", ")
-                            .append("Interrupted=").append(String.valueOf(thread.isInterrupted()))
-                            .append("]")
-                            .append("\n");
-                    for (StackTraceElement stackTraceElement : thread.getStackTrace()) {
-                        fos.append("  ")
-                                .append(stackTraceElement.toString())
-                                .append("\n");
-                    }
-                }
-                fos.flush();
-            } catch (Exception ignored) {
-            } finally {
-                if (fos != null) {
-                    try {
-                        fos.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-        }
-    }
-
-    private File sliceLogFile(String threadsInfoLog, String currentDate) {
-        File logFile = new File(threadsInfoLog);
-        if (logFile.exists()) {
-            String fileDate = dateFormatter.format(new Date(logFile.lastModified()));
-            String lastDate = fileDate.substring(0, 10);
-            if (!currentDate.substring(0, 10).equals(lastDate)) {
-                // Slice Log File
-                String sliceFilePath = logFile.getParentFile().getAbsolutePath() + "/" + lastDate.trim() + "/" + logFile.getName();
-                File sliceFile = new File(sliceFilePath);
-                boolean ignored = sliceFile.getParentFile().mkdirs();
-                copyFile(logFile, sliceFile);
-                ignored = logFile.delete();
-                logFile = new File(threadsInfoLog);
-            }
-        }
-        return logFile;
-    }
-
-    private void copyFile(File inFile, File outFile) {
-        FileChannel inChannel = null;
-        FileChannel outChannel = null;
-        try {
-            inChannel = new FileInputStream(inFile).getChannel();
-            outChannel = new FileOutputStream(outFile).getChannel();
-            outChannel.transferFrom(inChannel, 0, inChannel.size());
-        } catch (Exception ignored) {
-        } finally {
-            try {
-                if (inChannel != null) {
-                    inChannel.close();
-                }
-            } catch (Exception ignored) {
-            }
-            try {
-                if (outChannel != null) {
-                    outChannel.close();
-                }
-            } catch (Exception ignored) {
-            }
+    private void logFileTransport(Config config) {
+        LogTransport logFileTransportRunnable = config.logFileTransport;
+        if (!(logFileTransportRunnable == null ||
+                logFileTransportRunnable.isRunning())) {
+            new Thread(logFileTransportRunnable)
+                    .start();
         }
     }
 

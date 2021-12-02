@@ -49,6 +49,16 @@ lowercaseOutputName: false
 lowercaseOutputLabelNames: false
 whitelistObjectNames: ["org.apache.cassandra.metrics:*"]
 blacklistObjectNames: ["org.apache.cassandra.metrics:type=ColumnFamily,*"]
+logFileTransport:
+  remoteServerAddress: http://192.168.1.101:6061
+  appName: my-application
+  targetFiles:
+    - logFile: ./logs/web-info.log
+      logTag: info
+    - logFile: ./logs/web-error.log
+      logTag: error
+  sliceStyle: Month
+  enableThreadInfos: true
 rules:
   - pattern: 'org.apache.cassandra.metrics<type=(\w+), name=(\w+)><>Value: (\d+)'
     name: cassandra_$1_$2
@@ -72,6 +82,12 @@ lowercaseOutputName | Lowercase the output metric name. Applies to default forma
 lowercaseOutputLabelNames | Lowercase the output metric label names. Applies to default format and `labels`. Defaults to false.
 whitelistObjectNames | A list of [ObjectNames](http://docs.oracle.com/javase/6/docs/api/javax/management/ObjectName.html) to query. Defaults to all mBeans.
 blacklistObjectNames | A list of [ObjectNames](http://docs.oracle.com/javase/6/docs/api/javax/management/ObjectName.html) to not query. Takes precedence over `whitelistObjectNames`. Defaults to none.
+logFileTransport | A map of service log file transfer deployed on a VM container.
+remoteServerAddress | A full log content receiver URL. Request method is POST, and body just a text. Request headers includes appName and targetName.
+appName | The service name.
+targetFiles | A list of service log file config list.
+logFile | A service log file path on a VM container.
+logTag | A service log file tag.
 rules      | A list of rules to apply in order, processing stops at the first matching rule. Attributes that aren't matched aren't collected. If not specified, defaults to collecting everything in the default format.
 pattern           | Regex pattern to match against each bean attribute. The pattern is not anchored. Capture groups can be used in other options. Defaults to matching everything.
 attrNameSnakeCase | Converts the attribute name to snake case. This is seen in the names matched by the pattern and the default format. For example, anAttrName to an\_attr\_name. Defaults to false.
