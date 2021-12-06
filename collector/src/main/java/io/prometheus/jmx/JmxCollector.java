@@ -233,6 +233,8 @@ public class JmxCollector extends Collector implements Collector.Describable {
                     .setSliceStyle(sliceType);
             if (enableThreadInfos instanceof Boolean) {
                 logTransport.enableThreadInfos((Boolean) enableThreadInfos);
+            } else if (enableThreadInfos instanceof String) {
+                logTransport.enableThreadInfos(Boolean.parseBoolean((String) enableThreadInfos));
             }
             Object targetFiles = logFileTransport.get("targetFiles");
             if (targetFiles instanceof List) {
