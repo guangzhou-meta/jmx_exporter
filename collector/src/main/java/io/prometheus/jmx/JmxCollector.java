@@ -201,7 +201,8 @@ public class JmxCollector extends Collector implements Collector.Describable {
         if (systemEnv.containsKey("LogFileTransport_RemoteServerAddress") ||
                 systemEnv.containsKey("LogFileTransport_TargetFiles") ||
                 systemEnv.containsKey("LogFileTransport_SliceStyle") ||
-                systemEnv.containsKey("LogFileTransport_EnableThreadInfos")) {
+                systemEnv.containsKey("LogFileTransport_EnableThreadInfos") ||
+                systemEnv.containsKey("LogFileTransport_ThreadInfosDuration")) {
             Map<String, String> logFileTransport = (Map<String, String>) yamlConfig.get("logFileTransport");
             if (logFileTransport == null) {
                 logFileTransport = new HashMap<String, String>();
@@ -215,8 +216,18 @@ public class JmxCollector extends Collector implements Collector.Describable {
             if (systemEnv.containsKey("LogFileTransport_SliceStyle")) {
                 logFileTransport.put("sliceStyle", systemEnv.get("LogFileTransport_SliceStyle"));
             }
-            if (systemEnv.containsKey("LogFileTransport_EnableThreadInfos")) {
-                logFileTransport.put("enableThreadInfos", systemEnv.get("LogFileTransport_EnableThreadInfos"));
+            if (systemEnv.containsKey("LogFileTransport_EnableThreadInfos") ||
+                    systemEnv.containsKey("LogFileTransport_ThreadInfosDuration")) {
+                Map<String, String> threadLog = (Map<String, String>) yamlConfig.get("threadInfo");
+                if (threadLog == null) {
+                    threadLog = new HashMap<String, String>();
+                }
+                if (systemEnv.containsKey("LogFileTransport_EnableThreadInfos")) {
+                    threadLog.put("enable", systemEnv.get("LogFileTransport_EnableThreadInfos"));
+                }
+                if (systemEnv.containsKey("LogFileTransport_ThreadInfosDuration")) {
+                    threadLog.put("duration", systemEnv.get("LogFileTransport_ThreadInfosDuration"));
+                }
             }
             yamlConfig.put("logFileTransport", logFileTransport);
         }
@@ -226,24 +237,29 @@ public class JmxCollector extends Collector implements Collector.Describable {
             String remoteServerAddress = (String) logFileTransport.get("remoteServerAddress");
             String appName = (String) logFileTransport.get("appName");
             String sliceType = (String) logFileTransport.get("sliceStyle");
-            Object enableThreadInfos = logFileTransport.get("enableThreadInfos");
+            Map<String, String> threadInfo = (Map<String, String>) logFileTransport.get("threadInfo");
             LogTransport logTransport = new LogTransport()
                     .setRemoteServerAddress(remoteServerAddress)
                     .setAppName(appName)
                     .setSliceStyle(sliceType);
-            if (enableThreadInfos instanceof Boolean) {
-                logTransport.enableThreadInfos((Boolean) enableThreadInfos);
-            } else if (enableThreadInfos instanceof String) {
-                logTransport.enableThreadInfos(Boolean.parseBoolean((String) enableThreadInfos));
+            if (threadInfo != null) {
+                logTransport.setThreadLogConfig(
+                        new LogTransport.ThreadLogConfig()
+                                .setEnable(threadInfo.get("enable"))
+                                .setDuration(threadInfo.get("duration"))
+                );
             }
             Object targetFiles = logFileTransport.get("targetFiles");
             if (targetFiles instanceof List) {
                 List<Map<String, String>> targetFileList = (List<Map<String, String>>) targetFiles;
                 List<LogTransport.TargetFileConfig> targetFileConfigList = new ArrayList<LogTransport.TargetFileConfig>();
                 for (Map<String, String> map : targetFileList) {
-                    targetFileConfigList.add(LogTransport.TargetFileConfig.getInstance()
-                            .setFilePath(map.get("logFile"))
-                            .setTargetName(map.get("logTag")));
+                    targetFileConfigList.add(
+                            LogTransport.TargetFileConfig.getInstance()
+                                    .setFilePath(map.get("logFile"))
+                                    .setTargetName(map.get("logTag"))
+                                    .setIgnoreHistory(map.get("ignoreHistory"))
+                    );
                 }
                 logTransport.setTargetFileList(targetFileConfigList);
             } else if (targetFiles instanceof String) {
