@@ -216,9 +216,11 @@ public class JmxCollector extends Collector implements Collector.Describable {
             if (systemEnv.containsKey("LogFileTransport_SliceStyle")) {
                 logFileTransport.put("sliceStyle", systemEnv.get("LogFileTransport_SliceStyle"));
             }
+            yamlConfig.put("logFileTransport", logFileTransport);
             if (systemEnv.containsKey("LogFileTransport_EnableThreadInfos") ||
                     systemEnv.containsKey("LogFileTransport_ThreadInfosDuration")) {
-                Map<String, String> threadLog = (Map<String, String>) yamlConfig.get("threadInfo");
+                Map<String, Object> logFileTransport1 = (Map<String, Object>) yamlConfig.get("logFileTransport");
+                Map<String, String> threadLog = (Map<String, String>) logFileTransport1.get("threadInfo");
                 if (threadLog == null) {
                     threadLog = new HashMap<String, String>();
                 }
@@ -228,8 +230,8 @@ public class JmxCollector extends Collector implements Collector.Describable {
                 if (systemEnv.containsKey("LogFileTransport_ThreadInfosDuration")) {
                     threadLog.put("duration", systemEnv.get("LogFileTransport_ThreadInfosDuration"));
                 }
+                logFileTransport1.put("threadInfo", threadLog);
             }
-            yamlConfig.put("logFileTransport", logFileTransport);
         }
 
         if (yamlConfig.containsKey("logFileTransport")) {
